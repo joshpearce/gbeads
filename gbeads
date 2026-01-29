@@ -100,6 +100,7 @@ update_frontmatter_field() {
 
   # Replace the field value in frontmatter
   # This handles both "field: value" and "field: null" formats
+  # shellcheck disable=SC2001
   echo "$body" | sed "s/^${field}: .*/${field}: ${value}/"
 }
 
@@ -167,6 +168,7 @@ update_task_list_title() {
   local new_title="$3"
 
   # Replace the title part after #N
+  # shellcheck disable=SC2001
   echo "$body" | sed "s/^\(- \[[ x]\] #${number}\) .*/\1 ${new_title}/"
 }
 
@@ -178,12 +180,15 @@ parse_task_list() {
 
   echo "$body" | grep "^- \[[ x]\] #[0-9]" | while read -r line; do
     local checked="false"
+    # shellcheck disable=SC2076
     if [[ "$line" =~ "- [x]" ]]; then
       checked="true"
     fi
     local number
+    # shellcheck disable=SC2001
     number=$(echo "$line" | sed 's/^- \[[ x]\] #\([0-9]*\).*/\1/')
     local title
+    # shellcheck disable=SC2001
     title=$(echo "$line" | sed 's/^- \[[ x]\] #[0-9]* //')
     echo "${number}|${title}|${checked}"
   done
