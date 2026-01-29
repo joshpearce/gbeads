@@ -157,7 +157,8 @@ remove_task_list_entry() {
   local number="$2"
 
   # Remove line matching "- [ ] #N " or "- [x] #N "
-  echo "$body" | grep -v "^- \[[ x]\] #${number} "
+  # Using '|| true' to handle case where all lines are removed (grep -v returns 1)
+  echo "$body" | { grep -v "^- \[[ x]\] #${number} " || true; }
 }
 
 # Update title in task list entry
@@ -178,7 +179,7 @@ update_task_list_title() {
 parse_task_list() {
   local body="$1"
 
-  echo "$body" | grep "^- \[[ x]\] #[0-9]" | while read -r line; do
+  echo "$body" | { grep "^- \[[ x]\] #[0-9]" || true; } | while read -r line; do
     local checked="false"
     # shellcheck disable=SC2076
     if [[ "$line" =~ "- [x]" ]]; then
