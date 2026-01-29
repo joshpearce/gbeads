@@ -681,8 +681,7 @@ cmd_update() {
     exit 1
   }
 
-  local current_title current_body current_labels
-  current_title=$(echo "$issue_json" | python3 -c "import json,sys; print(json.load(sys.stdin)['title'])")
+  local current_body current_labels
   current_body=$(echo "$issue_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('body',''))")
   current_labels=$(echo "$issue_json" | python3 -c "import json,sys; print(','.join([l['name'] for l in json.load(sys.stdin).get('labels',[])]))")
 
