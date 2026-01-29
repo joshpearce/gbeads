@@ -8,6 +8,48 @@ set -euo pipefail
 
 readonly VERSION="0.1.0"
 
+# Get the GitHub repo in owner/repo format from git remote
+get_repo() {
+  local remote_url
+  remote_url=$(git remote get-url origin 2>/dev/null) || {
+    echo ""
+    return 1
+  }
+
+  # Handle SSH format: git@github.com:owner/repo.git
+  if [[ "$remote_url" =~ git@github\.com:([^/]+)/(.+)(\.git)?$ ]]; then
+    echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}"
+    return 0
+  fi
+
+  # Handle HTTPS format: https://github.com/owner/repo.git
+  if [[ "$remote_url" =~ https://github\.com/([^/]+)/(.+)(\.git)?$ ]]; then
+    echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}"
+    return 0
+  fi
+
+  echo ""
+  return 1
+}
+
+# Require that we're in a git repo with a GitHub remote
+# Sets REPO variable on success, exits on failure
+require_repo() {
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "Error: Not in a git repository" >&2
+    exit 1
+  fi
+
+  REPO=$(get_repo)
+  if [[ -z "$REPO" ]]; then
+    echo "Error: Could not determine GitHub repository from git remote" >&2
+    echo "Make sure 'origin' points to a GitHub repository." >&2
+    exit 1
+  fi
+
+  export REPO
+}
+
 usage() {
   cat <<EOF
 gbeads - GitHub issue wrapper for work organization
@@ -73,4 +115,7 @@ main() {
   esac
 }
 
-main "$@"
+# Only run main if this script is being executed (not sourced)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
