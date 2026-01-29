@@ -50,6 +50,145 @@ require_repo() {
   export REPO
 }
 
+# Create initial frontmatter block
+# Usage: create_frontmatter [parent]
+create_frontmatter() {
+  local parent="${1:-null}"
+  cat <<EOF
+---
+depends_on: []
+claimed_by: null
+parent: $parent
+---
+EOF
+}
+
+# Parse frontmatter from issue body, returns the value of a field
+# Usage: parse_frontmatter_field "body" "field_name"
+parse_frontmatter_field() {
+  local body="$1"
+  local field="$2"
+
+  # Check if body has frontmatter (starts with ---)
+  if [[ ! "$body" =~ ^--- ]]; then
+    echo ""
+    return 0
+  fi
+
+  # Extract the frontmatter section
+  local frontmatter
+  frontmatter=$(echo "$body" | sed -n '/^---$/,/^---$/p' | sed '1d;$d')
+
+  # Extract the field value (grep may not find match, so suppress error)
+  echo "$frontmatter" | grep "^${field}:" | sed "s/^${field}: *//" || echo ""
+}
+
+# Update a field in the frontmatter, returns the complete updated body
+# Usage: update_frontmatter_field "body" "field_name" "new_value"
+update_frontmatter_field() {
+  local body="$1"
+  local field="$2"
+  local value="$3"
+
+  # If no frontmatter exists, create it
+  if [[ ! "$body" =~ ^--- ]]; then
+    local frontmatter
+    frontmatter=$(create_frontmatter)
+    # Add body content after frontmatter
+    body="${frontmatter}"$'\n'"${body}"
+  fi
+
+  # Replace the field value in frontmatter
+  # This handles both "field: value" and "field: null" formats
+  echo "$body" | sed "s/^${field}: .*/${field}: ${value}/"
+}
+
+# Extract body content after frontmatter
+# Usage: get_body_content "full_body"
+get_body_content() {
+  local body="$1"
+
+  # If no frontmatter, return as-is
+  if [[ ! "$body" =~ ^--- ]]; then
+    echo "$body"
+    return 0
+  fi
+
+  # Skip the frontmatter section (delete from line 1 to second ---)
+  # First delete through first ---, then delete through the second ---
+  echo "$body" | sed '1d' | sed '1,/^---$/d'
+}
+
+# Check if issue body has a task list section
+# Usage: has_task_list "body"
+has_task_list() {
+  local body="$1"
+  [[ "$body" =~ "## Tasks" ]]
+}
+
+# Add a child to the task list in the body
+# Usage: add_task_list_entry "body" "number" "title"
+add_task_list_entry() {
+  local body="$1"
+  local number="$2"
+  local title="$3"
+
+  local entry="- [ ] #${number} ${title}"
+
+  if has_task_list "$body"; then
+    # Add after ## Tasks heading (POSIX-compatible approach)
+    # Note: BSD sed (macOS) and GNU sed have different 'a' command syntax
+    # Using awk for cross-platform compatibility
+    echo "$body" | awk -v entry="$entry" '/^## Tasks$/{print; print entry; next}1'
+  else
+    # Add new ## Tasks section at end
+    echo "$body"
+    echo ""
+    echo "## Tasks"
+    echo "$entry"
+  fi
+}
+
+# Remove a child from the task list
+# Usage: remove_task_list_entry "body" "number"
+remove_task_list_entry() {
+  local body="$1"
+  local number="$2"
+
+  # Remove line matching "- [ ] #N " or "- [x] #N "
+  echo "$body" | grep -v "^- \[[ x]\] #${number} "
+}
+
+# Update title in task list entry
+# Usage: update_task_list_title "body" "number" "new_title"
+update_task_list_title() {
+  local body="$1"
+  local number="$2"
+  local new_title="$3"
+
+  # Replace the title part after #N
+  echo "$body" | sed "s/^\(- \[[ x]\] #${number}\) .*/\1 ${new_title}/"
+}
+
+# Parse task list entries from body
+# Usage: parse_task_list "body"
+# Output: "number|title|checked" per line
+parse_task_list() {
+  local body="$1"
+
+  echo "$body" | grep "^- \[[ x]\] #[0-9]" | while read -r line; do
+    local checked="false"
+    if [[ "$line" =~ "- [x]" ]]; then
+      checked="true"
+    fi
+    local number
+    number=$(echo "$line" | sed 's/^- \[[ x]\] #\([0-9]*\).*/\1/')
+    local title
+    title=$(echo "$line" | sed 's/^- \[[ x]\] #[0-9]* //')
+    echo "${number}|${title}|${checked}"
+  done
+}
+
 usage() {
   cat <<EOF
 gbeads - GitHub issue wrapper for work organization
