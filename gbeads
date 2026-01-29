@@ -53,15 +53,15 @@ main() {
   fi
 
   case "$1" in
-    -h|--help)
+    -h | --help)
       usage
       exit 0
       ;;
-    -v|--version)
+    -v | --version)
       version
       exit 0
       ;;
-    init|create|list|show|claim|unclaim|update|close|reopen|children)
+    init | create | list | show | claim | unclaim | update | close | reopen | children)
       echo "Error: Command '$1' not yet implemented" >&2
       exit 1
       ;;

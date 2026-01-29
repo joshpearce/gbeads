@@ -7,7 +7,7 @@ test:
 # Run shellcheck and shfmt check
 lint:
 	shellcheck gbeads
-	shfmt -d gbeads
+	shfmt -d -i 2 -ci gbeads
 
 # Format gbeads script in place
 format:
