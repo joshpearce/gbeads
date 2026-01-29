@@ -518,6 +518,121 @@ cmd_create() {
   fi
 }
 
+# Claim an issue for a worker
+# Usage: gbeads claim <number> <worker-id>
+cmd_claim() {
+  require_repo
+
+  if [[ $# -lt 2 ]]; then
+    echo "Usage: gbeads claim <number> <worker-id>" >&2
+    exit 1
+  fi
+
+  local number="$1"
+  local worker_id="$2"
+
+  # Get current issue body
+  local body
+  body=$(gh issue view "$number" --repo "$REPO" --json body --jq '.body' 2>&1) || {
+    echo "Error: Issue #$number not found" >&2
+    exit 1
+  }
+
+  # Check if already claimed
+  local current_claimed
+  current_claimed=$(parse_frontmatter_field "$body" "claimed_by")
+  if [[ -n "$current_claimed" && "$current_claimed" != "null" ]]; then
+    echo "Error: Issue #$number is already claimed by $current_claimed" >&2
+    exit 1
+  fi
+
+  # Update claimed_by in frontmatter
+  local updated_body
+  updated_body=$(update_frontmatter_field "$body" "claimed_by" "$worker_id")
+
+  # Save updated body
+  gh issue edit "$number" --repo "$REPO" --body "$updated_body"
+
+  echo "Claimed issue #$number for $worker_id"
+}
+
+# Release a claimed issue
+# Usage: gbeads unclaim <number>
+cmd_unclaim() {
+  require_repo
+
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: gbeads unclaim <number>" >&2
+    exit 1
+  fi
+
+  local number="$1"
+
+  # Get current issue body
+  local body
+  body=$(gh issue view "$number" --repo "$REPO" --json body --jq '.body' 2>&1) || {
+    echo "Error: Issue #$number not found" >&2
+    exit 1
+  }
+
+  # Check if actually claimed
+  local current_claimed
+  current_claimed=$(parse_frontmatter_field "$body" "claimed_by")
+  if [[ -z "$current_claimed" || "$current_claimed" == "null" ]]; then
+    echo "Issue #$number is not claimed" >&2
+    exit 0
+  fi
+
+  # Update claimed_by to null
+  local updated_body
+  updated_body=$(update_frontmatter_field "$body" "claimed_by" "null")
+
+  # Save updated body
+  gh issue edit "$number" --repo "$REPO" --body "$updated_body"
+
+  echo "Released claim on issue #$number (was: $current_claimed)"
+}
+
+# Close an issue
+# Usage: gbeads close <number>
+cmd_close() {
+  require_repo
+
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: gbeads close <number>" >&2
+    exit 1
+  fi
+
+  local number="$1"
+
+  gh issue close "$number" --repo "$REPO" || {
+    echo "Error: Failed to close issue #$number" >&2
+    exit 1
+  }
+
+  echo "Closed issue #$number"
+}
+
+# Reopen a closed issue
+# Usage: gbeads reopen <number>
+cmd_reopen() {
+  require_repo
+
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: gbeads reopen <number>" >&2
+    exit 1
+  fi
+
+  local number="$1"
+
+  gh issue reopen "$number" --repo "$REPO" || {
+    echo "Error: Failed to reopen issue #$number" >&2
+    exit 1
+  }
+
+  echo "Reopened issue #$number"
+}
+
 usage() {
   cat <<EOF
 gbeads - GitHub issue wrapper for work organization
@@ -587,7 +702,23 @@ main() {
       shift
       cmd_show "$@"
       ;;
-    claim | unclaim | update | close | reopen | children)
+    claim)
+      shift
+      cmd_claim "$@"
+      ;;
+    unclaim)
+      shift
+      cmd_unclaim "$@"
+      ;;
+    close)
+      shift
+      cmd_close "$@"
+      ;;
+    reopen)
+      shift
+      cmd_reopen "$@"
+      ;;
+    update | children)
       echo "Error: Command '$1' not yet implemented" >&2
       exit 1
       ;;
