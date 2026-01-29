@@ -633,6 +633,116 @@ cmd_reopen() {
   echo "Reopened issue #$number"
 }
 
+# Update an issue
+# Usage: gbeads update <number> [--title "new title"] [--type <type>]
+cmd_update() {
+  require_repo
+
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: gbeads update <number> [--title \"new title\"] [--type <type>]" >&2
+    exit 1
+  fi
+
+  local number="$1"
+  shift
+
+  local new_title=""
+  local new_type=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --title)
+        new_title="$2"
+        shift 2
+        ;;
+      --type)
+        new_type="$2"
+        if ! validate_type "$new_type"; then
+          exit 1
+        fi
+        shift 2
+        ;;
+      *)
+        echo "Error: Unknown option '$1'" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  if [[ -z "$new_title" && -z "$new_type" ]]; then
+    echo "Error: Must specify --title or --type" >&2
+    exit 1
+  fi
+
+  # Get current issue data
+  local issue_json
+  issue_json=$(gh issue view "$number" --repo "$REPO" --json title,body,labels 2>&1) || {
+    echo "Error: Issue #$number not found" >&2
+    exit 1
+  }
+
+  local current_title current_body current_labels
+  current_title=$(echo "$issue_json" | python3 -c "import json,sys; print(json.load(sys.stdin)['title'])")
+  current_body=$(echo "$issue_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('body',''))")
+  current_labels=$(echo "$issue_json" | python3 -c "import json,sys; print(','.join([l['name'] for l in json.load(sys.stdin).get('labels',[])]))")
+
+  # Handle title update
+  if [[ -n "$new_title" ]]; then
+    gh issue edit "$number" --repo "$REPO" --title "$new_title"
+    echo "Updated title to: $new_title"
+
+    # Sync parent task list if issue has a parent
+    local parent
+    parent=$(parse_frontmatter_field "$current_body" "parent")
+    if [[ -n "$parent" && "$parent" != "null" ]]; then
+      sync_parent_task_list "$parent" "$number" "$new_title"
+    fi
+  fi
+
+  # Handle type update
+  if [[ -n "$new_type" ]]; then
+    local new_label
+    new_label=$(get_type_label "$new_type")
+
+    # Find and remove old type label
+    for t in "${VALID_TYPES[@]}"; do
+      local old_label="${TYPE_LABELS[$t]}"
+      if [[ "$current_labels" == *"$old_label"* ]]; then
+        gh issue edit "$number" --repo "$REPO" --remove-label "$old_label" 2>/dev/null || true
+      fi
+    done
+
+    # Add new type label
+    gh issue edit "$number" --repo "$REPO" --add-label "$new_label"
+    echo "Updated type to: $new_type"
+  fi
+}
+
+# Sync a child's title in the parent's task list
+# Usage: sync_parent_task_list <parent_number> <child_number> <new_title>
+sync_parent_task_list() {
+  local parent_number="$1"
+  local child_number="$2"
+  local new_title="$3"
+
+  # Get parent's body
+  local parent_body
+  parent_body=$(gh issue view "$parent_number" --repo "$REPO" --json body --jq '.body' 2>&1) || {
+    echo "Warning: Could not find parent #$parent_number to sync task list" >&2
+    return 0
+  }
+
+  # Update the task list entry
+  local updated_body
+  updated_body=$(update_task_list_title "$parent_body" "$child_number" "$new_title")
+
+  # Save if changed
+  if [[ "$updated_body" != "$parent_body" ]]; then
+    gh issue edit "$parent_number" --repo "$REPO" --body "$updated_body"
+    echo "Synced title to parent #$parent_number task list"
+  fi
+}
+
 usage() {
   cat <<EOF
 gbeads - GitHub issue wrapper for work organization
@@ -718,7 +828,11 @@ main() {
       shift
       cmd_reopen "$@"
       ;;
-    update | children)
+    update)
+      shift
+      cmd_update "$@"
+      ;;
+    children)
       echo "Error: Command '$1' not yet implemented" >&2
       exit 1
       ;;
