@@ -293,8 +293,7 @@ cmd_list() {
   printf "%-6s %-8s %-12s %s\n" "ID" "TYPE" "CLAIMED" "TITLE"
   printf "%-6s %-8s %-12s %s\n" "------" "--------" "------------" "-----"
 
-  # Parse JSON and display (using simple grep/sed since we can't rely on jq)
-  # This is a simplified approach - in practice you might want proper JSON parsing
+  # Parse JSON and display using Python for reliable JSON handling
   # shellcheck disable=SC2016
   echo "$issues_json" | python3 -c "
 import json
@@ -420,8 +419,8 @@ print(f'State:      {state}')
 print(f'Claimed by: {claimed_by}')
 print(f'Parent:     {parent}')
 print(f'Depends on: {depends_on}')
-print()
 if body_content:
+    print()
     print('Description:')
     print(body_content)
 "

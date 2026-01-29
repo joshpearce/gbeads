@@ -63,10 +63,12 @@ setup() {
   cd "$MOCK_GH_STATE/mock_repo"
   "$PROJECT_ROOT/gbeads" create task "Task 1" >/dev/null
   "$PROJECT_ROOT/gbeads" create task "Task 2" >/dev/null
-  # Skip this test - claim command not yet implemented
-  # "$PROJECT_ROOT/gbeads" claim 1 agent-001 >/dev/null
-
-  # For now just test the filtering logic exists
+  # TODO: Enhance this test when claim command is implemented in Phase 6
+  # Once claim is available, this test should:
+  #   1. Claim task 1 to agent-001
+  #   2. Verify list --claimed-by agent-001 shows only task 1
+  #   3. Verify list --claimed-by agent-002 shows neither task
+  # For now, just verify the flag doesn't cause errors
   run_gbeads list --claimed-by agent-001
   assert_success
 }
