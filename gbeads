@@ -227,6 +227,206 @@ parse_task_list() {
   done
 }
 
+# List issues with optional filters
+# Usage: gbeads list [--type <type>] [--claimed-by <id>] [--unclaimed] [--state <state>]
+cmd_list() {
+  require_repo
+
+  local filter_type=""
+  local filter_claimed_by=""
+  local filter_unclaimed=false
+  local filter_state="open"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type)
+        filter_type="$2"
+        if ! validate_type "$filter_type"; then
+          exit 1
+        fi
+        shift 2
+        ;;
+      --claimed-by)
+        filter_claimed_by="$2"
+        shift 2
+        ;;
+      --unclaimed)
+        filter_unclaimed=true
+        shift
+        ;;
+      --state)
+        filter_state="$2"
+        shift 2
+        ;;
+      --all)
+        filter_state="all"
+        shift
+        ;;
+      *)
+        echo "Error: Unknown option '$1'" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  # Build label filter
+  local label_filter=""
+  if [[ -n "$filter_type" ]]; then
+    label_filter=$(get_type_label "$filter_type")
+  fi
+
+  # Get issues as JSON
+  local issues_json
+  if [[ -n "$label_filter" ]]; then
+    issues_json=$(gh issue list --repo "$REPO" --state "$filter_state" --label "$label_filter" --json number,title,state,body,labels --limit 100)
+  else
+    issues_json=$(gh issue list --repo "$REPO" --state "$filter_state" --json number,title,state,body,labels --limit 100)
+  fi
+
+  # Check if we have any issues
+  if [[ -z "$issues_json" ]] || [[ "$issues_json" == "[]" ]]; then
+    echo "No issues found."
+    return 0
+  fi
+
+  # Header
+  printf "%-6s %-8s %-12s %s\n" "ID" "TYPE" "CLAIMED" "TITLE"
+  printf "%-6s %-8s %-12s %s\n" "------" "--------" "------------" "-----"
+
+  # Parse JSON and display (using simple grep/sed since we can't rely on jq)
+  # This is a simplified approach - in practice you might want proper JSON parsing
+  # shellcheck disable=SC2016
+  echo "$issues_json" | python3 -c "
+import json
+import sys
+
+data = json.load(sys.stdin)
+for issue in data:
+    number = issue['number']
+    title = issue['title']
+    body = issue.get('body', '')
+    labels = [l['name'] for l in issue.get('labels', [])]
+
+    # Determine type
+    issue_type = 'unknown'
+    type_map = {
+        'type: feature': 'feature',
+        'type: user story': 'story',
+        'type: task': 'task',
+        'type: bug': 'bug'
+    }
+    for label in labels:
+        if label in type_map:
+            issue_type = type_map[label]
+            break
+
+    # Parse claimed_by from frontmatter
+    claimed_by = '-'
+    if body.startswith('---'):
+        lines = body.split('\n')
+        for line in lines[1:]:
+            if line == '---':
+                break
+            if line.startswith('claimed_by:'):
+                val = line.split(':', 1)[1].strip()
+                if val and val != 'null':
+                    claimed_by = val
+                break
+
+    # Apply filters
+    filter_claimed = '${filter_claimed_by}'
+    filter_unclaimed = '${filter_unclaimed}'
+
+    if filter_claimed and claimed_by != filter_claimed:
+        continue
+    if filter_unclaimed == 'true' and claimed_by != '-':
+        continue
+
+    print(f'#{number:<5} {issue_type:<8} {claimed_by:<12} {title}')
+"
+}
+
+# Show issue details
+# Usage: gbeads show <number>
+cmd_show() {
+  require_repo
+
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: gbeads show <number>" >&2
+    exit 1
+  fi
+
+  local number="$1"
+
+  # Get issue data
+  local issue_json
+  issue_json=$(gh issue view "$number" --repo "$REPO" --json number,title,state,body,labels 2>&1) || {
+    echo "Error: Issue #$number not found" >&2
+    exit 1
+  }
+
+  # Parse and display using Python for reliable JSON handling
+  # shellcheck disable=SC2016
+  echo "$issue_json" | python3 -c "
+import json
+import sys
+
+issue = json.load(sys.stdin)
+number = issue['number']
+title = issue['title']
+state = issue['state']
+body = issue.get('body', '')
+labels = [l['name'] for l in issue.get('labels', [])]
+
+# Determine type
+issue_type = 'unknown'
+type_map = {
+    'type: feature': 'feature',
+    'type: user story': 'story',
+    'type: task': 'task',
+    'type: bug': 'bug'
+}
+for label in labels:
+    if label in type_map:
+        issue_type = type_map[label]
+        break
+
+# Parse frontmatter
+depends_on = '[]'
+claimed_by = 'null'
+parent = 'null'
+body_content = body
+
+if body.startswith('---'):
+    lines = body.split('\n')
+    frontmatter_end = -1
+    for i, line in enumerate(lines[1:], 1):
+        if line == '---':
+            frontmatter_end = i
+            break
+        if line.startswith('depends_on:'):
+            depends_on = line.split(':', 1)[1].strip()
+        elif line.startswith('claimed_by:'):
+            claimed_by = line.split(':', 1)[1].strip()
+        elif line.startswith('parent:'):
+            parent = line.split(':', 1)[1].strip()
+
+    if frontmatter_end > 0:
+        body_content = '\n'.join(lines[frontmatter_end + 1:]).strip()
+
+print(f'Issue #{number}: {title}')
+print(f'Type:       {issue_type}')
+print(f'State:      {state}')
+print(f'Claimed by: {claimed_by}')
+print(f'Parent:     {parent}')
+print(f'Depends on: {depends_on}')
+print()
+if body_content:
+    print('Description:')
+    print(body_content)
+"
+}
+
 # Initialize gbeads labels in the repository
 cmd_init() {
   require_repo
@@ -380,7 +580,15 @@ main() {
       shift
       cmd_create "$@"
       ;;
-    list | show | claim | unclaim | update | close | reopen | children)
+    list)
+      shift
+      cmd_list "$@"
+      ;;
+    show)
+      shift
+      cmd_show "$@"
+      ;;
+    claim | unclaim | update | close | reopen | children)
       echo "Error: Command '$1' not yet implemented" >&2
       exit 1
       ;;
