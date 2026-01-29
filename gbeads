@@ -250,6 +250,75 @@ cmd_init() {
   echo "Done. Created $created labels, $exists already existed."
 }
 
+# Create a new issue
+# Usage: gbeads create <type> "title" [--parent <n>]
+cmd_create() {
+  require_repo
+
+  if [[ $# -lt 2 ]]; then
+    echo "Usage: gbeads create <type> \"title\" [--parent <n>]" >&2
+    exit 1
+  fi
+
+  local type="$1"
+  local title="$2"
+  shift 2
+
+  # Validate type
+  if ! validate_type "$type"; then
+    exit 1
+  fi
+
+  # Parse optional flags
+  local parent=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --parent)
+        parent="$2"
+        shift 2
+        ;;
+      *)
+        echo "Error: Unknown option '$1'" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  # Create frontmatter
+  local body
+  if [[ -n "$parent" ]]; then
+    body=$(create_frontmatter "$parent")
+  else
+    body=$(create_frontmatter)
+  fi
+
+  # Get the label for this type
+  local label
+  label=$(get_type_label "$type")
+
+  # Create the issue
+  local output
+  output=$(gh issue create --repo "$REPO" --title "$title" --body "$body" --label "$label")
+
+  # Extract issue number from output URL
+  local number
+  number=$(echo "$output" | grep -o '[0-9]*$')
+
+  echo "Created $type #$number: $title"
+
+  # If parent specified, update parent's task list
+  if [[ -n "$parent" ]]; then
+    local parent_body
+    parent_body=$(gh issue view "$parent" --repo "$REPO" --json body --jq '.body')
+
+    local updated_body
+    updated_body=$(add_task_list_entry "$parent_body" "$number" "$title")
+
+    gh issue edit "$parent" --repo "$REPO" --body "$updated_body"
+    echo "Added to parent #$parent task list"
+  fi
+}
+
 usage() {
   cat <<EOF
 gbeads - GitHub issue wrapper for work organization
@@ -307,7 +376,11 @@ main() {
       shift
       cmd_init "$@"
       ;;
-    create | list | show | claim | unclaim | update | close | reopen | children)
+    create)
+      shift
+      cmd_create "$@"
+      ;;
+    list | show | claim | unclaim | update | close | reopen | children)
       echo "Error: Command '$1' not yet implemented" >&2
       exit 1
       ;;

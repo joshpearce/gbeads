@@ -3,6 +3,10 @@
 load test_helper
 
 setup() {
+  # Clean and recreate test_data for each test
+  rm -rf "$MOCK_GH_STATE"
+  mkdir -p "$MOCK_GH_STATE"
+
   # Create a mock git repo for each test
   mkdir -p "$MOCK_GH_STATE/mock_repo"
   cd "$MOCK_GH_STATE/mock_repo"
