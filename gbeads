@@ -742,6 +742,121 @@ sync_parent_task_list() {
   fi
 }
 
+# Manage child issues in task list
+# Usage: gbeads children <number> [--add <n,...>] [--remove <n>]
+cmd_children() {
+  require_repo
+
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: gbeads children <number> [--add <n,...>] [--remove <n>]" >&2
+    exit 1
+  fi
+
+  local number="$1"
+  shift
+
+  local add_children=""
+  local remove_child=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --add)
+        add_children="$2"
+        shift 2
+        ;;
+      --remove)
+        remove_child="$2"
+        shift 2
+        ;;
+      *)
+        echo "Error: Unknown option '$1'" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  # Get current issue body
+  local body
+  body=$(gh issue view "$number" --repo "$REPO" --json body --jq '.body' 2>&1) || {
+    echo "Error: Issue #$number not found" >&2
+    exit 1
+  }
+
+  # If no flags, list children
+  if [[ -z "$add_children" && -z "$remove_child" ]]; then
+    list_children "$body"
+    return 0
+  fi
+
+  local updated_body="$body"
+
+  # Handle add
+  if [[ -n "$add_children" ]]; then
+    # Split by comma
+    IFS=',' read -ra child_numbers <<<"$add_children"
+    for child_num in "${child_numbers[@]}"; do
+      child_num=$(echo "$child_num" | tr -d ' ')
+
+      # Get child's title
+      local child_title
+      child_title=$(gh issue view "$child_num" --repo "$REPO" --json title --jq '.title' 2>&1) || {
+        echo "Warning: Issue #$child_num not found, skipping" >&2
+        continue
+      }
+
+      # Update child's frontmatter to set parent
+      local child_body
+      child_body=$(gh issue view "$child_num" --repo "$REPO" --json body --jq '.body')
+      local updated_child_body
+      updated_child_body=$(update_frontmatter_field "$child_body" "parent" "$number")
+      gh issue edit "$child_num" --repo "$REPO" --body "$updated_child_body"
+
+      # Add to task list
+      updated_body=$(add_task_list_entry "$updated_body" "$child_num" "$child_title")
+      echo "Added #$child_num: $child_title"
+    done
+  fi
+
+  # Handle remove
+  if [[ -n "$remove_child" ]]; then
+    # Clear parent in child's frontmatter
+    local child_body
+    child_body=$(gh issue view "$remove_child" --repo "$REPO" --json body --jq '.body' 2>/dev/null)
+    if [[ -n "$child_body" ]]; then
+      local updated_child_body
+      updated_child_body=$(update_frontmatter_field "$child_body" "parent" "null")
+      gh issue edit "$remove_child" --repo "$REPO" --body "$updated_child_body"
+    fi
+
+    # Remove from task list
+    updated_body=$(remove_task_list_entry "$updated_body" "$remove_child")
+    echo "Removed #$remove_child from task list"
+  fi
+
+  # Save updated parent body
+  gh issue edit "$number" --repo "$REPO" --body "$updated_body"
+}
+
+# List children from task list
+list_children() {
+  local body="$1"
+
+  local entries
+  entries=$(parse_task_list "$body")
+
+  if [[ -z "$entries" ]]; then
+    echo "No children in task list."
+    return 0
+  fi
+
+  echo "Children:"
+  echo "$entries" | while IFS='|' read -r num title checked; do
+    local status="[ ]"
+    [[ "$checked" == "true" ]] && status="[x]"
+    printf "  %s #%-4s %s\n" "$status" "$num" "$title"
+  done
+}
+
 usage() {
   cat <<EOF
 gbeads - GitHub issue wrapper for work organization
@@ -832,8 +947,8 @@ main() {
       cmd_update "$@"
       ;;
     children)
-      echo "Error: Command '$1' not yet implemented" >&2
-      exit 1
+      shift
+      cmd_children "$@"
       ;;
     *)
       echo "Error: Unknown command '$1'" >&2
