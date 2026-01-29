@@ -1,6 +1,10 @@
 # Test data (preserved for inspection, cleared at test start)
 tests/test_data/
 
+# Bats helper libraries (if cloned locally)
+tests/test_helper/bats-support/
+tests/test_helper/bats-assert/
+
 # Node modules (from npm install during setup)
 node_modules/
 
