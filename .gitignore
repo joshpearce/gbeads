@@ -1,0 +1,15 @@
+# Test data (preserved for inspection, cleared at test start)
+tests/test_data/
+
+# Node modules (from npm install during setup)
+node_modules/
+
+# OS files
+.DS_Store
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
