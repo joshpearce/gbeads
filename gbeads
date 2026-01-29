@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# gbeads - GitHub issue wrapper for work organization
+#
+# A lightweight CLI that wraps `gh` to provide work organization
+# primitives using GitHub issues with type labels and YAML frontmatter.
+
+set -euo pipefail
+
+readonly VERSION="0.1.0"
+
+usage() {
+  cat <<EOF
+gbeads - GitHub issue wrapper for work organization
+
+Usage:
+  gbeads <command> [options]
+
+Commands:
+  init                Create type labels in current repo
+  create <type> "title"   Create a typed issue (feature|story|task|bug)
+  list                List issues with optional filters
+  show <number>       Show issue details
+  claim <number> <id> Claim an issue for a worker
+  unclaim <number>    Release a claimed issue
+  update <number>     Update issue title or type
+  close <number>      Close an issue
+  reopen <number>     Reopen a closed issue
+  children <number>   Manage child issues in task list
+
+Options:
+  -h, --help          Show this help message
+  -v, --version       Show version
+
+Examples:
+  gbeads init
+  gbeads create task "Implement login form"
+  gbeads create feature "User authentication" --parent 5
+  gbeads list --type task --unclaimed
+  gbeads claim 12 agent-001
+  gbeads update 12 --title "New title"
+
+EOF
+}
+
+version() {
+  echo "gbeads version $VERSION"
+}
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    usage
+    exit 0
+  fi
+
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -v|--version)
+      version
+      exit 0
+      ;;
+    init|create|list|show|claim|unclaim|update|close|reopen|children)
+      echo "Error: Command '$1' not yet implemented" >&2
+      exit 1
+      ;;
+    *)
+      echo "Error: Unknown command '$1'" >&2
+      echo "Run 'gbeads --help' for usage information." >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
