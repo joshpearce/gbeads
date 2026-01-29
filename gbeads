@@ -8,6 +8,17 @@ set -euo pipefail
 
 readonly VERSION="0.1.0"
 
+# Valid issue types
+readonly VALID_TYPES=("feature" "story" "task" "bug")
+
+# Type to label mapping
+declare -A TYPE_LABELS=(
+  ["feature"]="type: feature"
+  ["story"]="type: user story"
+  ["task"]="type: task"
+  ["bug"]="type: bug"
+)
+
 # Get the GitHub repo in owner/repo format from git remote
 get_repo() {
   local remote_url
@@ -48,6 +59,27 @@ require_repo() {
   fi
 
   export REPO
+}
+
+# Validate issue type
+# Usage: validate_type "type"
+validate_type() {
+  local type="$1"
+  for valid in "${VALID_TYPES[@]}"; do
+    if [[ "$type" == "$valid" ]]; then
+      return 0
+    fi
+  done
+  echo "Error: Invalid type '$type'" >&2
+  echo "Valid types: ${VALID_TYPES[*]}" >&2
+  return 1
+}
+
+# Get label for type
+# Usage: get_type_label "type"
+get_type_label() {
+  local type="$1"
+  echo "${TYPE_LABELS[$type]}"
 }
 
 # Create initial frontmatter block
@@ -195,6 +227,29 @@ parse_task_list() {
   done
 }
 
+# Initialize gbeads labels in the repository
+cmd_init() {
+  require_repo
+
+  echo "Initializing gbeads labels in $REPO..."
+
+  local created=0
+  local exists=0
+
+  for type in "${VALID_TYPES[@]}"; do
+    local label="${TYPE_LABELS[$type]}"
+    if gh label create "$label" --repo "$REPO" --description "gbeads: $type" 2>/dev/null; then
+      echo "  Created: $label"
+      created=$((created + 1))
+    else
+      echo "  Exists: $label"
+      exists=$((exists + 1))
+    fi
+  done
+
+  echo "Done. Created $created labels, $exists already existed."
+}
+
 usage() {
   cat <<EOF
 gbeads - GitHub issue wrapper for work organization
@@ -248,7 +303,11 @@ main() {
       version
       exit 0
       ;;
-    init | create | list | show | claim | unclaim | update | close | reopen | children)
+    init)
+      shift
+      cmd_init "$@"
+      ;;
+    create | list | show | claim | unclaim | update | close | reopen | children)
       echo "Error: Command '$1' not yet implemented" >&2
       exit 1
       ;;
