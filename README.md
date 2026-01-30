@@ -2,6 +2,8 @@
 
 Lightweight GitHub issue wrapper for work organization.
 
+Inspired by [steveyegge/beads](https://github.com/steveyegge/beads).
+
 gbeads wraps the `gh` CLI to provide work organization primitives using GitHub issues:
 - **Type labels**: feature, user story, task, bug
 - **Metadata blocks**: Collapsible HTML tables for depends_on, claimed_by, parent fields
