@@ -37,14 +37,14 @@ setup() {
   assert_output --partial "Usage:"
 }
 
-@test "claim sets claimed_by in frontmatter" {
+@test "claim sets claimed_by in metadata" {
   cd "$MOCK_GH_STATE/mock_repo"
   run_gbeads claim 1 agent-001
   assert_success
   assert_output --partial "Claimed issue #1 for agent-001"
 
   run gh issue view 1 --json body
-  assert_output --partial "claimed_by: agent-001"
+  assert_output --partial "claimed_by | agent-001"
 }
 
 @test "claim fails if already claimed" {
@@ -81,7 +81,7 @@ setup() {
   assert_output --partial "Released claim"
 
   run gh issue view 1 --json body
-  assert_output --partial "claimed_by: null"
+  assert_output --partial "claimed_by | null"
 }
 
 @test "unclaim on unclaimed issue is idempotent" {

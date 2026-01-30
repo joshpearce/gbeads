@@ -21,16 +21,21 @@ gbeads supports four issue types, managed via GitHub labels:
 | task | `type: task` | Implementation tasks |
 | bug | `type: bug` | Bug reports |
 
-### Frontmatter
+### Metadata Block
 
-Each issue body contains YAML frontmatter with metadata:
+Each issue body contains a collapsible HTML metadata block with a markdown table:
 
-```yaml
----
-depends_on: []
-claimed_by: null
-parent: null
----
+```html
+<details>
+<summary>Metadata</summary>
+
+| Field | Value |
+|-------|-------|
+| depends_on | [] |
+| claimed_by | null |
+| parent | null |
+
+</details>
 ```
 
 - `depends_on`: Array of issue numbers this issue depends on
@@ -46,6 +51,16 @@ Parent issues contain GitHub task lists linking to children:
 - [ ] #12 Implement login form
 - [x] #13 Add validation
 - [ ] #14 Style form
+```
+
+## Agent Workflow
+
+For automated agents, gbeads provides a simple workflow:
+
+```bash
+gbeads ready              # Find unblocked, unclaimed work
+gbeads claim <n> <id>     # Claim before starting work
+gbeads close <n>          # Mark complete when done
 ```
 
 ## Commands
@@ -65,7 +80,7 @@ Creates the four type labels if they don't exist.
 Create a new typed issue.
 
 ```bash
-gbeads create <type> "title" [--parent <n>]
+gbeads create <type> "title" [--parent <n>] [--body "description"]
 ```
 
 **Arguments:**
@@ -74,13 +89,14 @@ gbeads create <type> "title" [--parent <n>]
 
 **Options:**
 - `--parent <n>`: Set parent issue and add to parent's task list
+- `--body "description"`: Add description content to the issue body
 
 **Examples:**
 
 ```bash
 gbeads create feature "User authentication"
 gbeads create story "Login flow" --parent 1
-gbeads create task "Build form" --parent 2
+gbeads create task "Build form" --parent 2 --body "Implement the login form component"
 gbeads create bug "Login fails on mobile"
 ```
 
@@ -117,7 +133,7 @@ Display issue details.
 gbeads show <number>
 ```
 
-Shows issue title, type, state, and parsed frontmatter fields.
+Shows issue title, type, state, and parsed metadata fields.
 
 **Example:**
 
@@ -138,6 +154,32 @@ Description:
 Form implementation details...
 ```
 
+### ready
+
+List available work (unclaimed and unblocked issues).
+
+```bash
+gbeads ready
+```
+
+Shows open issues that are:
+- Not claimed by any worker
+- Not blocked by open dependencies (all dependencies must be closed)
+
+**Example:**
+
+```bash
+gbeads ready
+```
+
+Output:
+```
+ID     TYPE     TITLE
+------ -------- -----
+#3     task     Implement login form
+#5     bug      Fix validation error
+```
+
 ### claim
 
 Claim an issue for a worker.
@@ -146,7 +188,7 @@ Claim an issue for a worker.
 gbeads claim <number> <worker-id>
 ```
 
-Sets `claimed_by` in frontmatter. Fails if already claimed.
+Sets `claimed_by` in metadata block. Fails if already claimed.
 
 **Example:**
 
@@ -162,7 +204,7 @@ Release a claimed issue.
 gbeads unclaim <number>
 ```
 
-Clears `claimed_by` in frontmatter.
+Clears `claimed_by` in metadata block.
 
 **Example:**
 
@@ -172,15 +214,19 @@ gbeads unclaim 5
 
 ### update
 
-Update issue title or type.
+Update issue title, type, or description.
 
 ```bash
-gbeads update <number> [--title "new title"] [--type <type>]
+gbeads update <number> [--title "new title"] [--type <type>] [--body "description"]
 ```
+
+**Arguments:**
+- `<number>`: Issue number (required)
 
 **Options:**
 - `--title "..."`: Update issue title (syncs to parent task list)
 - `--type <type>`: Change issue type (swaps labels)
+- `--body "description"`: Replace the issue description (preserves metadata and tasks)
 
 **Examples:**
 
@@ -188,6 +234,7 @@ gbeads update <number> [--title "new title"] [--type <type>]
 gbeads update 5 --title "Build login form component"
 gbeads update 5 --type bug
 gbeads update 5 --title "New name" --type feature
+gbeads update 5 --body "Updated implementation notes"
 ```
 
 ### close
@@ -233,11 +280,11 @@ gbeads children <number> [--add <n,...>] [--remove <n>]
 - `--remove <n>`: Remove issue from task list
 
 Adding a child:
-1. Sets `parent` in child's frontmatter
+1. Sets `parent` in child's metadata block
 2. Adds task list entry to parent
 
 Removing a child:
-1. Clears `parent` in child's frontmatter
+1. Clears `parent` in child's metadata block
 2. Removes task list entry from parent
 
 **Examples:**
@@ -246,6 +293,31 @@ Removing a child:
 gbeads children 1                  # List children of #1
 gbeads children 1 --add 5,6,7      # Add #5, #6, #7 as children
 gbeads children 1 --remove 5       # Remove #5 from children
+```
+
+### depends
+
+Manage issue dependencies.
+
+```bash
+gbeads depends <number> [--add <n,...>] [--remove <n>]
+```
+
+**Without flags:** Lists current dependencies
+
+**Options:**
+- `--add <n,...>`: Add dependencies (comma-separated issue numbers)
+- `--remove <n>`: Remove dependency
+
+Dependencies are one-way: if issue #6 depends on #5, only #6's metadata is modified. Issue #5 is not affected.
+
+**Examples:**
+
+```bash
+gbeads depends 6                   # List dependencies of #6
+gbeads depends 6 --add 5           # #6 now depends on #5
+gbeads depends 6 --add 5,7         # #6 depends on #5 and #7
+gbeads depends 6 --remove 5        # Remove #5 from dependencies
 ```
 
 ## Workflows

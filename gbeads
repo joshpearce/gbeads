@@ -2,7 +2,7 @@
 # gbeads - GitHub issue wrapper for work organization
 #
 # A lightweight CLI that wraps `gh` to provide work organization
-# primitives using GitHub issues with type labels and YAML frontmatter.
+# primitives using GitHub issues with type labels and metadata blocks.
 
 set -euo pipefail
 
@@ -82,74 +82,129 @@ get_type_label() {
   echo "${TYPE_LABELS[$type]}"
 }
 
-# Create initial frontmatter block
-# Usage: create_frontmatter [parent]
-create_frontmatter() {
+# Create initial metadata block
+# Usage: create_metadata [parent]
+create_metadata() {
   local parent="${1:-null}"
   cat <<EOF
----
-depends_on: []
-claimed_by: null
-parent: $parent
----
+<details>
+<summary>Metadata</summary>
+
+| Field | Value |
+|-------|-------|
+| depends_on | [] |
+| claimed_by | null |
+| parent | $parent |
+
+</details>
 EOF
 }
 
-# Parse frontmatter from issue body, returns the value of a field
-# Usage: parse_frontmatter_field "body" "field_name"
-parse_frontmatter_field() {
+# Parse metadata from issue body, returns the value of a field
+# Usage: parse_metadata_field "body" "field_name"
+parse_metadata_field() {
   local body="$1"
   local field="$2"
 
-  # Check if body has frontmatter (starts with ---)
-  if [[ ! "$body" =~ ^--- ]]; then
-    echo ""
-    return 0
-  fi
+  # Use Python for reliable HTML table parsing (stdin avoids quoting issues)
+  echo "$body" | python3 -c "
+import sys
+import re
 
-  # Extract the frontmatter section
-  local frontmatter
-  frontmatter=$(echo "$body" | sed -n '/^---$/,/^---$/p' | sed '1d;$d')
+body = sys.stdin.read()
+field = sys.argv[1]
 
-  # Extract the field value (grep may not find match, so suppress error)
-  echo "$frontmatter" | grep "^${field}:" | sed "s/^${field}: *//" || echo ""
+# Check if body has metadata block
+if not body.startswith('<details>'):
+    print('')
+    sys.exit(0)
+
+# Find the table rows
+# Pattern: | field_name | value |
+pattern = rf'\| {re.escape(field)} \| (.+?) \|'
+match = re.search(pattern, body)
+if match:
+    print(match.group(1).strip())
+else:
+    print('')
+" "$field"
 }
 
-# Update a field in the frontmatter, returns the complete updated body
-# Usage: update_frontmatter_field "body" "field_name" "new_value"
-update_frontmatter_field() {
+# Update a field in the metadata, returns the complete updated body
+# Usage: update_metadata_field "body" "field_name" "new_value"
+update_metadata_field() {
   local body="$1"
   local field="$2"
   local value="$3"
 
-  # If no frontmatter exists, create it
-  if [[ ! "$body" =~ ^--- ]]; then
-    local frontmatter
-    frontmatter=$(create_frontmatter)
-    # Add body content after frontmatter
-    body="${frontmatter}"$'\n'"${body}"
-  fi
+  # Use Python for reliable HTML table manipulation (stdin avoids quoting issues)
+  echo "$body" | python3 -c "
+import sys
+import re
 
-  # Replace the field value in frontmatter
-  # This handles both "field: value" and "field: null" formats
-  # shellcheck disable=SC2001
-  echo "$body" | sed "s/^${field}: .*/${field}: ${value}/"
+body = sys.stdin.read()
+field = sys.argv[1]
+value = sys.argv[2]
+
+# If no metadata exists, create it
+if not body.startswith('<details>'):
+    # Generate metadata block
+    metadata = '''<details>
+<summary>Metadata</summary>
+
+| Field | Value |
+|-------|-------|
+| depends_on | [] |
+| claimed_by | null |
+| parent | null |
+
+</details>'''
+    body = metadata + '\n' + body if body else metadata
+
+# Replace the field value in the table
+# Pattern matches: | field_name | old_value |
+pattern = rf'(\| {re.escape(field)} \|) .+? \|'
+replacement = rf'\g<1> {value} |'
+body = re.sub(pattern, replacement, body)
+
+print(body)
+" "$field" "$value"
 }
 
-# Extract body content after frontmatter
+# Extract body content after metadata block (before ## Tasks if present)
 # Usage: get_body_content "full_body"
 get_body_content() {
   local body="$1"
 
-  # If no frontmatter, return as-is
-  if [[ ! "$body" =~ ^--- ]]; then
-    echo "$body"
-    return 0
-  fi
+  # Use Python for reliable parsing (stdin avoids quoting issues)
+  echo "$body" | python3 -c "
+import sys
 
-  # Skip the frontmatter section (delete from line 1 to second ---)
-  # First delete through first ---, then delete through the second ---
-  echo "$body" | sed '1d' | sed '1,/^---$/d'
+body = sys.stdin.read()
+
+# If no metadata block, return as-is
+if not body.startswith('<details>'):
+    print(body)
+    sys.exit(0)
+
+# Find end of metadata block (</details>)
+end_marker = '</details>'
+end_pos = body.find(end_marker)
+if end_pos == -1:
+    print(body)
+    sys.exit(0)
+
+# Extract content after </details>
+content = body[end_pos + len(end_marker):].strip()
+
+# If there's a ## Tasks section, only return content before it
+tasks_marker = '## Tasks'
+tasks_pos = content.find(tasks_marker)
+if tasks_pos != -1:
+    content = content[:tasks_pos].strip()
+
+print(content)
+"
 }
 
 # Check if issue body has a task list section
@@ -319,18 +374,15 @@ for issue in data:
             issue_type = type_map[label]
             break
 
-    # Parse claimed_by from frontmatter
+    # Parse claimed_by from metadata table
     claimed_by = '-'
-    if body.startswith('---'):
-        lines = body.split('\n')
-        for line in lines[1:]:
-            if line == '---':
-                break
-            if line.startswith('claimed_by:'):
-                val = line.split(':', 1)[1].strip()
-                if val and val != 'null':
-                    claimed_by = val
-                break
+    if body.startswith('<details>'):
+        import re
+        match = re.search(r'\| claimed_by \| (.+?) \|', body)
+        if match:
+            val = match.group(1).strip()
+            if val and val != 'null':
+                claimed_by = val
 
     # Apply filters
     filter_claimed = '${filter_claimed_by}'
@@ -343,6 +395,125 @@ for issue in data:
 
     print(f'#{number:<5} {issue_type:<8} {claimed_by:<12} {title}')
 "
+}
+
+# List available work (unclaimed + unblocked)
+# Usage: gbeads ready
+cmd_ready() {
+  require_repo
+
+  # Get all issues (open and closed) to check dependency states
+  local issues_json
+  issues_json=$(gh issue list --repo "$REPO" --state all --json number,title,state,body,labels --limit 500)
+
+  # Check if we have any issues
+  if [[ -z "$issues_json" ]] || [[ "$issues_json" == "[]" ]]; then
+    echo "No available work."
+    return 0
+  fi
+
+  # Use Python to filter to unclaimed, unblocked, open issues
+  # shellcheck disable=SC2016
+  local result
+  result=$(echo "$issues_json" | python3 -c '
+import json
+import sys
+import re
+
+data = json.load(sys.stdin)
+
+# Build map of issue number -> state (normalize to uppercase)
+issue_states = {}
+for issue in data:
+    issue_states[issue["number"]] = issue["state"].upper()
+
+# Filter for available work
+available = []
+for issue in data:
+    # Skip if not open (handle both uppercase and lowercase)
+    if issue["state"].upper() != "OPEN":
+        continue
+
+    body = issue.get("body", "")
+    labels = [l["name"] for l in issue.get("labels", [])]
+
+    # Parse claimed_by from metadata
+    claimed_by = None
+    if body.startswith("<details>"):
+        match = re.search(r"\| claimed_by \| (.+?) \|", body)
+        if match:
+            val = match.group(1).strip()
+            if val and val != "null":
+                claimed_by = val
+
+    # Skip if claimed
+    if claimed_by:
+        continue
+
+    # Parse depends_on from metadata
+    depends_on = []
+    if body.startswith("<details>"):
+        match = re.search(r"\| depends_on \| (.+?) \|", body)
+        if match:
+            val = match.group(1).strip()
+            try:
+                deps = json.loads(val)
+                if isinstance(deps, list):
+                    depends_on = deps
+            except:
+                pass
+
+    # Check if all dependencies are closed
+    blocked = False
+    for dep in depends_on:
+        dep_state = issue_states.get(dep)
+        # If dependency is not closed (or not found), issue is blocked
+        if dep_state != "CLOSED":
+            blocked = True
+            break
+
+    if blocked:
+        continue
+
+    # Determine type
+    issue_type = "unknown"
+    type_map = {
+        "type: feature": "feature",
+        "type: user story": "story",
+        "type: task": "task",
+        "type: bug": "bug"
+    }
+    for label in labels:
+        if label in type_map:
+            issue_type = type_map[label]
+            break
+
+    available.append({
+        "number": issue["number"],
+        "title": issue["title"],
+        "type": issue_type
+    })
+
+if not available:
+    print("NO_AVAILABLE_WORK")
+else:
+    print("HEADER")
+    for a in available:
+        num = a["number"]
+        typ = a["type"]
+        title = a["title"]
+        print(f"#{num:<5} {typ:<8} {title}")
+')
+
+  if [[ "$result" == "NO_AVAILABLE_WORK" ]]; then
+    echo "No available work."
+    return 0
+  fi
+
+  # Print header and results
+  printf "%-6s %-8s %s\n" "ID" "TYPE" "TITLE"
+  printf "%-6s %-8s %s\n" "------" "--------" "-----"
+  echo "$result" | tail -n +2 # Skip HEADER marker
 }
 
 # Show issue details
@@ -390,28 +561,42 @@ for label in labels:
         issue_type = type_map[label]
         break
 
-# Parse frontmatter
+# Parse metadata
+import re
 depends_on = '[]'
 claimed_by = 'null'
 parent = 'null'
 body_content = body
 
-if body.startswith('---'):
-    lines = body.split('\n')
-    frontmatter_end = -1
-    for i, line in enumerate(lines[1:], 1):
-        if line == '---':
-            frontmatter_end = i
-            break
-        if line.startswith('depends_on:'):
-            depends_on = line.split(':', 1)[1].strip()
-        elif line.startswith('claimed_by:'):
-            claimed_by = line.split(':', 1)[1].strip()
-        elif line.startswith('parent:'):
-            parent = line.split(':', 1)[1].strip()
+if body.startswith('<details>'):
+    # Find end of metadata block (</details>)
+    end_marker = '</details>'
+    end_pos = body.find(end_marker)
+    if end_pos > 0:
+        metadata_section = body[:end_pos + len(end_marker)]
 
-    if frontmatter_end > 0:
-        body_content = '\n'.join(lines[frontmatter_end + 1:]).strip()
+        # Extract values from metadata table
+        depends_on_match = re.search(r'\| depends_on \| (.+?) \|', metadata_section)
+        if depends_on_match:
+            depends_on = depends_on_match.group(1).strip()
+
+        claimed_by_match = re.search(r'\| claimed_by \| (.+?) \|', metadata_section)
+        if claimed_by_match:
+            claimed_by = claimed_by_match.group(1).strip()
+
+        parent_match = re.search(r'\| parent \| (.+?) \|', metadata_section)
+        if parent_match:
+            parent = parent_match.group(1).strip()
+
+        # Extract body content after </details>
+        content = body[end_pos + len(end_marker):].strip()
+
+        # Remove ## Tasks section if present
+        tasks_pos = content.find('## Tasks')
+        if tasks_pos != -1:
+            content = content[:tasks_pos].strip()
+
+        body_content = content
 
 print(f'Issue #{number}: {title}')
 print(f'Type:       {issue_type}')
@@ -450,12 +635,12 @@ cmd_init() {
 }
 
 # Create a new issue
-# Usage: gbeads create <type> "title" [--parent <n>]
+# Usage: gbeads create <type> "title" [--parent <n>] [--body "description"]
 cmd_create() {
   require_repo
 
   if [[ $# -lt 2 ]]; then
-    echo "Usage: gbeads create <type> \"title\" [--parent <n>]" >&2
+    echo "Usage: gbeads create <type> \"title\" [--parent <n>] [--body \"description\"]" >&2
     exit 1
   fi
 
@@ -470,10 +655,15 @@ cmd_create() {
 
   # Parse optional flags
   local parent=""
+  local body_content=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --parent)
         parent="$2"
+        shift 2
+        ;;
+      --body)
+        body_content="$2"
         shift 2
         ;;
       *)
@@ -483,12 +673,17 @@ cmd_create() {
     esac
   done
 
-  # Create frontmatter
+  # Create metadata
   local body
   if [[ -n "$parent" ]]; then
-    body=$(create_frontmatter "$parent")
+    body=$(create_metadata "$parent")
   else
-    body=$(create_frontmatter)
+    body=$(create_metadata)
+  fi
+
+  # Append user body content if provided
+  if [[ -n "$body_content" ]]; then
+    body="${body}"$'\n\n'"${body_content}"
   fi
 
   # Get the label for this type
@@ -540,15 +735,15 @@ cmd_claim() {
 
   # Check if already claimed
   local current_claimed
-  current_claimed=$(parse_frontmatter_field "$body" "claimed_by")
+  current_claimed=$(parse_metadata_field "$body" "claimed_by")
   if [[ -n "$current_claimed" && "$current_claimed" != "null" ]]; then
     echo "Error: Issue #$number is already claimed by $current_claimed" >&2
     exit 1
   fi
 
-  # Update claimed_by in frontmatter
+  # Update claimed_by in metadata
   local updated_body
-  updated_body=$(update_frontmatter_field "$body" "claimed_by" "$worker_id")
+  updated_body=$(update_metadata_field "$body" "claimed_by" "$worker_id")
 
   # Save updated body
   gh issue edit "$number" --repo "$REPO" --body "$updated_body"
@@ -577,7 +772,7 @@ cmd_unclaim() {
 
   # Check if actually claimed
   local current_claimed
-  current_claimed=$(parse_frontmatter_field "$body" "claimed_by")
+  current_claimed=$(parse_metadata_field "$body" "claimed_by")
   if [[ -z "$current_claimed" || "$current_claimed" == "null" ]]; then
     echo "Issue #$number is not claimed" >&2
     exit 0
@@ -585,7 +780,7 @@ cmd_unclaim() {
 
   # Update claimed_by to null
   local updated_body
-  updated_body=$(update_frontmatter_field "$body" "claimed_by" "null")
+  updated_body=$(update_metadata_field "$body" "claimed_by" "null")
 
   # Save updated body
   gh issue edit "$number" --repo "$REPO" --body "$updated_body"
@@ -634,12 +829,12 @@ cmd_reopen() {
 }
 
 # Update an issue
-# Usage: gbeads update <number> [--title "new title"] [--type <type>]
+# Usage: gbeads update <number> [--title "new title"] [--type <type>] [--body "description"]
 cmd_update() {
   require_repo
 
   if [[ $# -lt 1 ]]; then
-    echo "Usage: gbeads update <number> [--title \"new title\"] [--type <type>]" >&2
+    echo "Usage: gbeads update <number> [--title \"new title\"] [--type <type>] [--body \"description\"]" >&2
     exit 1
   fi
 
@@ -648,6 +843,7 @@ cmd_update() {
 
   local new_title=""
   local new_type=""
+  local new_body=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -662,6 +858,10 @@ cmd_update() {
         fi
         shift 2
         ;;
+      --body)
+        new_body="$2"
+        shift 2
+        ;;
       *)
         echo "Error: Unknown option '$1'" >&2
         exit 1
@@ -669,8 +869,8 @@ cmd_update() {
     esac
   done
 
-  if [[ -z "$new_title" && -z "$new_type" ]]; then
-    echo "Error: Must specify --title or --type" >&2
+  if [[ -z "$new_title" && -z "$new_type" && -z "$new_body" ]]; then
+    echo "Error: Must specify --title, --type, or --body" >&2
     exit 1
   fi
 
@@ -692,7 +892,7 @@ cmd_update() {
 
     # Sync parent task list if issue has a parent
     local parent
-    parent=$(parse_frontmatter_field "$current_body" "parent")
+    parent=$(parse_metadata_field "$current_body" "parent")
     if [[ -n "$parent" && "$parent" != "null" ]]; then
       sync_parent_task_list "$parent" "$number" "$new_title"
     fi
@@ -714,6 +914,45 @@ cmd_update() {
     # Add new type label
     gh issue edit "$number" --repo "$REPO" --add-label "$new_label"
     echo "Updated type to: $new_type"
+  fi
+
+  # Handle body update
+  if [[ -n "$new_body" ]]; then
+    # Extract metadata and tasks using Python (stdin avoids quoting issues)
+    local metadata tasks_section
+
+    metadata=$(echo "$current_body" | python3 -c "
+import sys
+body = sys.stdin.read()
+end_marker = '</details>'
+end_pos = body.find(end_marker)
+if end_pos != -1:
+    print(body[:end_pos + len(end_marker)])
+else:
+    print('')
+")
+
+    tasks_section=$(echo "$current_body" | python3 -c "
+import sys
+body = sys.stdin.read()
+tasks_marker = '## Tasks'
+tasks_pos = body.find(tasks_marker)
+if tasks_pos != -1:
+    print(body[tasks_pos:])
+else:
+    print('')
+")
+
+    # Reassemble: metadata + new body + tasks
+    local updated_body
+    if [[ -n "$tasks_section" ]]; then
+      updated_body="${metadata}"$'\n\n'"${new_body}"$'\n\n'"${tasks_section}"
+    else
+      updated_body="${metadata}"$'\n\n'"${new_body}"
+    fi
+
+    gh issue edit "$number" --repo "$REPO" --body "$updated_body"
+    echo "Updated body description"
   fi
 }
 
@@ -804,11 +1043,11 @@ cmd_children() {
         continue
       }
 
-      # Update child's frontmatter to set parent
+      # Update child's metadata to set parent
       local child_body
       child_body=$(gh issue view "$child_num" --repo "$REPO" --json body --jq '.body')
       local updated_child_body
-      updated_child_body=$(update_frontmatter_field "$child_body" "parent" "$number")
+      updated_child_body=$(update_metadata_field "$child_body" "parent" "$number")
       gh issue edit "$child_num" --repo "$REPO" --body "$updated_child_body"
 
       # Add to task list
@@ -819,12 +1058,12 @@ cmd_children() {
 
   # Handle remove
   if [[ -n "$remove_child" ]]; then
-    # Clear parent in child's frontmatter
+    # Clear parent in child's metadata
     local child_body
     child_body=$(gh issue view "$remove_child" --repo "$REPO" --json body --jq '.body' 2>/dev/null)
     if [[ -n "$child_body" ]]; then
       local updated_child_body
-      updated_child_body=$(update_frontmatter_field "$child_body" "parent" "null")
+      updated_child_body=$(update_metadata_field "$child_body" "parent" "null")
       gh issue edit "$remove_child" --repo "$REPO" --body "$updated_child_body"
     fi
 
@@ -857,9 +1096,188 @@ list_children() {
   done
 }
 
+# Manage issue dependencies
+# Usage: gbeads depends <number> [--add <n,m,...>] [--remove <n,m,...>]
+cmd_depends() {
+  require_repo
+
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: gbeads depends <number> [--add <n,m,...>] [--remove <n,m,...>]" >&2
+    exit 1
+  fi
+
+  local number="$1"
+  shift
+
+  local add_deps=""
+  local remove_deps=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --add)
+        add_deps="$2"
+        shift 2
+        ;;
+      --remove)
+        remove_deps="$2"
+        shift 2
+        ;;
+      *)
+        echo "Error: Unknown option '$1'" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  # Get current issue
+  local issue_data
+  issue_data=$(gh issue view "$number" --repo "$REPO" --json number,title,body 2>&1) || {
+    echo "Error: Issue #$number not found" >&2
+    exit 1
+  }
+
+  local title body
+  title=$(echo "$issue_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d['title'])")
+  body=$(echo "$issue_data" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d['body'])")
+
+  # Parse current depends_on value
+  local current_deps
+  current_deps=$(parse_metadata_field "$body" "depends_on")
+  if [[ -z "$current_deps" ]]; then
+    current_deps="[]"
+  fi
+
+  # If no flags, display current dependencies
+  if [[ -z "$add_deps" && -z "$remove_deps" ]]; then
+    echo "Issue #$number: $title"
+    # Parse dependencies and fetch titles
+    local deps_list
+    deps_list=$(echo "$current_deps" | python3 -c "
+import sys
+import json
+
+deps_str = sys.stdin.read().strip()
+try:
+    deps = json.loads(deps_str) if deps_str else []
+except:
+    deps = []
+
+for d in deps:
+    print(d)
+")
+    if [[ -z "$deps_list" ]]; then
+      echo "Dependencies: none"
+    else
+      local dep_display=""
+      while IFS= read -r dep_num; do
+        local dep_title
+        dep_title=$(gh issue view "$dep_num" --repo "$REPO" --json title --jq '.title' 2>/dev/null) || dep_title="(not found)"
+        if [[ -n "$dep_display" ]]; then
+          dep_display="$dep_display, #$dep_num ($dep_title)"
+        else
+          dep_display="#$dep_num ($dep_title)"
+        fi
+      done <<<"$deps_list"
+      echo "Dependencies: $dep_display"
+    fi
+    exit 0
+  fi
+
+  # Check for self-dependency before processing
+  if [[ -n "$add_deps" ]]; then
+    IFS=',' read -ra check_deps <<<"$add_deps"
+    for dep_num in "${check_deps[@]}"; do
+      dep_num=$(echo "$dep_num" | tr -d ' ')
+      if [[ "$dep_num" == "$number" ]]; then
+        echo "Error: Issue cannot depend on itself" >&2
+        exit 1
+      fi
+    done
+  fi
+
+  # Validate added dependencies exist and collect valid ones
+  local valid_adds=""
+  if [[ -n "$add_deps" ]]; then
+    IFS=',' read -ra dep_numbers <<<"$add_deps"
+    for dep_num in "${dep_numbers[@]}"; do
+      dep_num=$(echo "$dep_num" | tr -d ' ')
+      if [[ -n "$dep_num" ]]; then
+        local dep_title
+        dep_title=$(gh issue view "$dep_num" --repo "$REPO" --json title --jq '.title' 2>&1) || {
+          echo "Warning: Issue #$dep_num not found, skipping" >&2
+          continue
+        }
+        echo "Added dependency: #$dep_num ($dep_title)"
+        if [[ -n "$valid_adds" ]]; then
+          valid_adds="$valid_adds,$dep_num"
+        else
+          valid_adds="$dep_num"
+        fi
+      fi
+    done
+  fi
+
+  # Recalculate updated_deps with only valid additions
+  local updated_deps
+  updated_deps=$(echo "$current_deps" | python3 -c "
+import sys
+import json
+
+current_str = sys.stdin.read().strip()
+valid_adds = '$valid_adds'
+remove_deps = '$remove_deps'
+
+try:
+    deps = json.loads(current_str) if current_str else []
+except:
+    deps = []
+
+deps_set = set(int(d) for d in deps)
+
+# Only add validated dependencies
+if valid_adds:
+    for d in valid_adds.split(','):
+        d = d.strip()
+        if d:
+            deps_set.add(int(d))
+
+# Process removals
+if remove_deps:
+    for d in remove_deps.split(','):
+        d = d.strip()
+        if d:
+            deps_set.discard(int(d))
+
+print(json.dumps(sorted(deps_set)))
+")
+
+  # Report removals
+  if [[ -n "$remove_deps" ]]; then
+    IFS=',' read -ra dep_numbers <<<"$remove_deps"
+    for dep_num in "${dep_numbers[@]}"; do
+      dep_num=$(echo "$dep_num" | tr -d ' ')
+      if [[ -n "$dep_num" ]]; then
+        echo "Removed dependency: #$dep_num"
+      fi
+    done
+  fi
+
+  # Update metadata
+  local updated_body
+  updated_body=$(update_metadata_field "$body" "depends_on" "$updated_deps")
+
+  # Save changes
+  gh issue edit "$number" --repo "$REPO" --body "$updated_body"
+}
+
 usage() {
   cat <<EOF
 gbeads - GitHub issue wrapper for work organization
+
+Agent Workflow:
+  gbeads ready              Find unblocked, unclaimed work
+  gbeads claim <n> <id>     Claim before starting work
+  gbeads close <n>          Mark complete when done
 
 Usage:
   gbeads <command> [options]
@@ -869,12 +1287,14 @@ Commands:
   create <type> "title"   Create a typed issue (feature|story|task|bug)
   list                List issues with optional filters
   show <number>       Show issue details
+  ready               List available work (unclaimed + unblocked)
   claim <number> <id> Claim an issue for a worker
   unclaim <number>    Release a claimed issue
   update <number>     Update issue title or type
   close <number>      Close an issue
   reopen <number>     Reopen a closed issue
   children <number>   Manage child issues in task list
+  depends <number>    Manage issue dependencies
 
 Options:
   -h, --help          Show this help message
@@ -926,6 +1346,10 @@ main() {
       shift
       cmd_show "$@"
       ;;
+    ready)
+      shift
+      cmd_ready "$@"
+      ;;
     claim)
       shift
       cmd_claim "$@"
@@ -949,6 +1373,10 @@ main() {
     children)
       shift
       cmd_children "$@"
+      ;;
+    depends)
+      shift
+      cmd_depends "$@"
       ;;
     *)
       echo "Error: Unknown command '$1'" >&2

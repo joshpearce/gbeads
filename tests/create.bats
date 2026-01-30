@@ -69,18 +69,18 @@ setup() {
   assert_output --partial "type: bug"
 }
 
-@test "create adds frontmatter to body" {
+@test "create adds metadata to body" {
   cd "$MOCK_GH_STATE/mock_repo"
   run_gbeads create task "Test task"
   assert_success
 
   run gh issue view 1 --json body
-  assert_output --partial "depends_on:"
-  assert_output --partial "claimed_by:"
-  assert_output --partial "parent: null"
+  assert_output --partial "depends_on | []"
+  assert_output --partial "claimed_by | null"
+  assert_output --partial "parent | null"
 }
 
-@test "create with --parent sets parent in frontmatter" {
+@test "create with --parent sets parent in metadata" {
   cd "$MOCK_GH_STATE/mock_repo"
 
   # Create parent feature
@@ -92,9 +92,9 @@ setup() {
   assert_success
   assert_output --partial "Added to parent #1"
 
-  # Verify child has parent in frontmatter
+  # Verify child has parent in metadata
   run gh issue view 2 --json body
-  assert_output --partial "parent: 1"
+  assert_output --partial "parent | 1"
 }
 
 @test "create with --parent adds entry to parent task list" {
@@ -112,4 +112,30 @@ setup() {
   run gh issue view 1 --json body
   assert_output --partial "## Tasks"
   assert_output --partial "- [ ] #2 Child task"
+}
+
+@test "create with --body adds content after metadata" {
+  cd "$MOCK_GH_STATE/mock_repo"
+  run_gbeads create task "Task with body" --body "This is the description"
+  assert_success
+
+  run gh issue view 1 --json body
+  assert_output --partial "<details>"
+  assert_output --partial "This is the description"
+}
+
+@test "create with --parent and --body includes both" {
+  cd "$MOCK_GH_STATE/mock_repo"
+
+  # Create parent
+  "$PROJECT_ROOT/gbeads" create feature "Parent" >/dev/null
+
+  # Create child with body
+  run_gbeads create task "Child" --parent 1 --body "Child description"
+  assert_success
+
+  # Verify child has both parent and body
+  run gh issue view 2 --json body
+  assert_output --partial "| parent | 1 |"
+  assert_output --partial "Child description"
 }

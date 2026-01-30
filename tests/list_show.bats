@@ -92,7 +92,7 @@ setup() {
   assert_output --partial "State:      open"
 }
 
-@test "show displays frontmatter fields" {
+@test "show displays metadata fields" {
   cd "$MOCK_GH_STATE/mock_repo"
   "$PROJECT_ROOT/gbeads" create feature "Parent" >/dev/null
   "$PROJECT_ROOT/gbeads" create task "Child" --parent 1 >/dev/null

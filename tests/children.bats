@@ -61,9 +61,9 @@ setup() {
   run gh issue view 1 --json body
   assert_output --partial "- [ ] #2 Orphan task"
 
-  # Verify child has parent in frontmatter
+  # Verify child has parent in metadata
   run gh issue view 2 --json body
-  assert_output --partial "parent: 1"
+  assert_output --partial "parent | 1"
 }
 
 @test "children --add handles multiple children" {
@@ -100,7 +100,7 @@ setup() {
 
   # Verify child's parent is cleared
   run gh issue view 2 --json body
-  assert_output --partial "parent: null"
+  assert_output --partial "parent | null"
 }
 
 @test "children --add skips nonexistent issues" {

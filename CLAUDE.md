@@ -1,6 +1,6 @@
 # gbeads
 
-Last verified: 2026-01-29
+Last verified: 2026-01-30
 
 ## Tech Stack
 - Language: Bash 4.0+
@@ -24,7 +24,7 @@ Last verified: 2026-01-29
 
 Lightweight wrapper around `gh` CLI for work organization using GitHub issues. Provides:
 - Type labels: feature, story, task, bug
-- YAML frontmatter: depends_on, claimed_by, parent fields
+- HTML metadata blocks: depends_on, claimed_by, parent fields (collapsible table)
 - Task lists: Parent/child relationships via GitHub checkboxes
 
 ## Contracts
@@ -35,31 +35,40 @@ Lightweight wrapper around `gh` CLI for work organization using GitHub issues. P
 - `task` -> `type: task`
 - `bug` -> `type: bug`
 
-**Frontmatter Format** (every issue body starts with):
-```yaml
----
-depends_on: []
-claimed_by: null
-parent: null
----
+**Metadata Format** (every issue body starts with):
+```html
+<details>
+<summary>Metadata</summary>
+
+| Field | Value |
+|-------|-------|
+| depends_on | [] |
+| claimed_by | null |
+| parent | null |
+
+</details>
 ```
 
 **Commands** (all require git repo with GitHub remote):
 - `init` - Create type labels
-- `create <type> "title" [--parent n]` - Create typed issue
+- `create <type> "title" [--parent n] [--body "desc"]` - Create typed issue
 - `list [filters]` - List issues
 - `show <n>` - Show issue details
 - `claim/unclaim <n> [worker]` - Manage claims
-- `update <n> [--title/--type]` - Update issue
+- `update <n> [--title/--type/--body]` - Update issue
 - `close/reopen <n>` - Lifecycle
 - `children <n> [--add/--remove]` - Manage task list
+- `depends <n> [--add/--remove]` - Manage dependencies
 
 ## Key Invariants
 - All type labels have `type: ` prefix
-- Frontmatter always uses `---` delimiters
+- Metadata block uses `<details>` with markdown table format
 - Task list entries are `- [ ] #N title` format
 - Claim fails if already claimed (no silent overwrite)
 - Child updates sync to parent task list titles
+- Dependencies are one-way (only dependent issue metadata changes)
+- Self-dependency is prevented
+- Dependency add/remove are idempotent
 
 ## Testing Notes
 - Tests use mock gh in `tests/mock_gh/gh`

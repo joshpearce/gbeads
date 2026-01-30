@@ -30,7 +30,7 @@ setup() {
 
   run_gbeads update 1
   assert_failure
-  assert_output --partial "Must specify --title or --type"
+  assert_output --partial "Must specify --title, --type, or --body"
 }
 
 @test "update --title changes issue title" {
@@ -132,4 +132,67 @@ setup() {
   run_gbeads update 2 --type bug
   assert_success
   refute_output --partial "Synced title"
+}
+
+@test "update --body changes description" {
+  cd "$MOCK_GH_STATE/mock_repo"
+  "$PROJECT_ROOT/gbeads" create task "A task" --body "Original description" >/dev/null
+
+  run_gbeads update 1 --body "New description"
+  assert_success
+  assert_output --partial "Updated body description"
+
+  run gh issue view 1 --json body
+  assert_output --partial "New description"
+  refute_output --partial "Original description"
+}
+
+@test "update --body preserves metadata" {
+  cd "$MOCK_GH_STATE/mock_repo"
+  "$PROJECT_ROOT/gbeads" create task "A task" >/dev/null
+
+  # Claim the issue first (to have non-default metadata)
+  "$PROJECT_ROOT/gbeads" claim 1 worker-abc >/dev/null
+
+  run_gbeads update 1 --body "Added description"
+  assert_success
+
+  # Verify metadata preserved
+  run gh issue view 1 --json body
+  assert_output --partial "| claimed_by | worker-abc |"
+  assert_output --partial "Added description"
+}
+
+@test "update --body preserves tasks section" {
+  cd "$MOCK_GH_STATE/mock_repo"
+
+  # Create parent with body
+  "$PROJECT_ROOT/gbeads" create feature "Parent" --body "Parent description" >/dev/null
+
+  # Add child (creates tasks section)
+  "$PROJECT_ROOT/gbeads" create task "Child" --parent 1 >/dev/null
+
+  # Update parent body
+  run_gbeads update 1 --body "Updated parent description"
+  assert_success
+
+  # Verify tasks preserved
+  run gh issue view 1 --json body
+  assert_output --partial "Updated parent description"
+  assert_output --partial "## Tasks"
+  assert_output --partial "- [ ] #2 Child"
+}
+
+@test "update --body and --title together" {
+  cd "$MOCK_GH_STATE/mock_repo"
+  "$PROJECT_ROOT/gbeads" create task "Original" >/dev/null
+
+  run_gbeads update 1 --title "New title" --body "New description"
+  assert_success
+  assert_output --partial "Updated title"
+  assert_output --partial "Updated body"
+
+  run gh issue view 1 --json title,body
+  assert_output --partial "New title"
+  assert_output --partial "New description"
 }
