@@ -1,8 +1,10 @@
 # gbeads
 
-Lightweight GitHub issue wrapper for work organization.
+Lightweight GitHub issue wrapper for work organization. Work in progress.
 
 Inspired by [steveyegge/beads](https://github.com/steveyegge/beads).
+
+The skill is aware of, [ed3d-plugins, ed3d-plan-and-execute](https://github.com/ed3dai/ed3d-plugins) though not condoned by Ed.
 
 gbeads wraps the `gh` CLI to provide work organization primitives using GitHub issues:
 - **Type labels**: feature, user story, task, bug
